@@ -1,0 +1,57 @@
+{
+    "name": "swanflutter/laravel-api-snapshot",
+    "description": "A professional Laravel package that scans all API routes and generates a Postman Collection v2.1 JSON — with FormRequest validation extraction, fake sample values, Persian/English descriptions, and flexible grouping.",
+    "keywords": [
+        "laravel",
+        "postman",
+        "api",
+        "documentation",
+        "collection",
+        "postman-collection",
+        "api-docs",
+        "route-exporter",
+        "formrequest"
+    ],
+    "homepage": "https://github.com/swanflutter/laravel-api-snapshot",
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "SwanFlutter",
+            "email": "swan.dev1993@gmail.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0|^11.0|^12.0",
+        "illuminate/routing": "^10.0|^11.0|^12.0",
+        "illuminate/console": "^10.0|^11.0|^12.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0",
+        "phpunit/phpunit": "^10.0|^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "SwanFlutter\\LaravelApiSnapshot\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SwanFlutter\\LaravelApiSnapshot\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "SwanFlutter\\LaravelApiSnapshot\\ApiSnapshotServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

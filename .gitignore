@@ -1,0 +1,10 @@
+/vendor/
+/node_modules/
+*.log
+.env
+.env.*
+!.env.example
+composer.lock
+test_output.json
+*.cache
+.phpunit.result.cache
