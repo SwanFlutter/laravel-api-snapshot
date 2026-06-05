@@ -2,6 +2,7 @@
 
 namespace SwanFlutter\LaravelApiSnapshot;
 
+use Illuminate\Cache\CacheManager;
 use Illuminate\Routing\Route;
 use Illuminate\Routing\Router;
 use SwanFlutter\LaravelApiSnapshot\Extractors\RouteExtractor;
@@ -15,16 +16,22 @@ use SwanFlutter\LaravelApiSnapshot\Generators\FakeValueGenerator;
 class ApiSnapshotGenerator
 {
     private readonly RouteExtractor $routeExtractor;
+    private readonly ?CacheManager $cache;
+    private readonly bool $skipCache;
 
     /** @param  array<string, mixed>  $config */
     public function __construct(
         private readonly Router $router,
         private readonly array  $config,
+        ?CacheManager $cache = null,
+        bool $skipCache = false,
     ) {
         $this->routeExtractor = new RouteExtractor(
             new RuleExtractor(),
             new FakeValueGenerator(),
         );
+        $this->cache = $cache;
+        $this->skipCache = $skipCache;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -38,11 +45,42 @@ class ApiSnapshotGenerator
      */
     public function generate(): array
     {
+        $cacheConfig = $this->config['cache'] ?? [];
+        $cacheEnabled = ($cacheConfig['enabled'] ?? true) && $this->cache && !$this->skipCache;
+        $cacheKey = ($cacheConfig['prefix'] ?? 'api_snapshot_') . 'collection';
+        $cacheTtl = (int) ($cacheConfig['ttl'] ?? 3600);
+
+        if ($cacheEnabled) {
+            $cached = $this->cache->get($cacheKey);
+            if ($cached) {
+                return $cached;
+            }
+        }
+
         $routes  = $this->collectRoutes();
         $grouped = $this->groupRoutes($routes);
         $items   = $this->buildItems($grouped);
+        $collection = $this->buildCollection($items);
 
-        return $this->buildCollection($items);
+        if ($cacheEnabled) {
+            $this->cache->put($cacheKey, $collection, $cacheTtl);
+        }
+
+        return $collection;
+    }
+
+    /**
+     * Clear the cached collection.
+     */
+    public function clearCache(): void
+    {
+        if (!$this->cache) {
+            return;
+        }
+
+        $cacheConfig = $this->config['cache'] ?? [];
+        $cacheKey = ($cacheConfig['prefix'] ?? 'api_snapshot_') . 'collection';
+        $this->cache->forget($cacheKey);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -34,4 +34,10 @@ return [
         ['key' => 'Accept',       'value' => 'application/json'],
     ],
 
+    'cache' => [
+        'enabled' => env('API_SNAPSHOT_CACHE_ENABLED', true),
+        'ttl' => env('API_SNAPSHOT_CACHE_TTL', 3600), // seconds
+        'prefix' => 'api_snapshot_',
+    ],
+
 ];

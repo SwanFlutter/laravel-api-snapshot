@@ -14,7 +14,9 @@ class SnapshotGenerateCommand extends Command
         {--exclude=     : Comma-separated URI patterns to exclude}
         {--group-by=    : Grouping strategy: prefix or controller}
         {--no-persian   : Disable Persian/Farsi descriptions}
-        {--force        : Overwrite output file without prompting}';
+        {--force        : Overwrite output file without prompting}
+        {--no-cache     : Skip cache and regenerate fresh collection}
+        {--clear-cache  : Clear cache before generating}';
 
     protected $description = 'Generate a Postman Collection v2.1 JSON from all registered Laravel routes';
 
@@ -35,7 +37,18 @@ class SnapshotGenerateCommand extends Command
         $success = false;
 
         $this->components->task('Scanning routes and generating collection', function () use ($config, $outputFile, &$success): bool {
-            $generator  = new ApiSnapshotGenerator($this->laravel['router'], $config);
+            $generator = new ApiSnapshotGenerator(
+                $this->laravel['router'], 
+                $config, 
+                $this->laravel->make('cache'), 
+                $this->option('no-cache')
+            );
+
+            if ($this->option('clear-cache')) {
+                $generator->clearCache();
+                $this->components->info('Cache cleared');
+            }
+
             $collection = $generator->generate();
             $json       = json_encode($collection, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 

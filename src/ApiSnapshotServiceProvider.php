@@ -17,7 +17,8 @@ class ApiSnapshotServiceProvider extends ServiceProvider
         $this->app->singleton(ApiSnapshotGenerator::class, function ($app) {
             return new ApiSnapshotGenerator(
                 $app['router'],
-                $app['config']->get('api-snapshot', [])
+                $app['config']->get('api-snapshot', []),
+                $app->make('cache')
             );
         });
     }
