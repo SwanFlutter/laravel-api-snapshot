@@ -3,6 +3,7 @@
 namespace SwanFlutter\LaravelApiSnapshot;
 
 use Illuminate\Support\ServiceProvider;
+use SwanFlutter\LaravelApiSnapshot\Console\SnapshotClearCacheCommand;
 use SwanFlutter\LaravelApiSnapshot\Console\SnapshotGenerateCommand;
 
 class ApiSnapshotServiceProvider extends ServiceProvider
@@ -32,6 +33,7 @@ class ApiSnapshotServiceProvider extends ServiceProvider
 
             $this->commands([
                 SnapshotGenerateCommand::class,
+                SnapshotClearCacheCommand::class,
             ]);
         }
     }
