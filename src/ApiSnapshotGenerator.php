@@ -66,7 +66,7 @@ class ApiSnapshotGenerator
                     }
                 }
 
-                if (!empty($includeMiddleware)) {
+                if (! empty($includeMiddleware)) {
                     $routeMiddleware = $route->gatherMiddleware();
                     foreach ($includeMiddleware as $required) {
                         foreach ($routeMiddleware as $m) {
@@ -121,7 +121,7 @@ class ApiSnapshotGenerator
         $uri      = ltrim($route->uri(), '/');
         $segments = array_values(array_filter(
             explode('/', $uri),
-            fn ($s) => $s !== '' && !str_starts_with($s, '{')
+            fn ($s) => $s !== '' && ! str_starts_with($s, '{')
         ));
 
         if (isset($segments[0]) && strtolower($segments[0]) === 'api') {
@@ -141,14 +141,14 @@ class ApiSnapshotGenerator
     private function groupByController(Route $route): array
     {
         $action = $route->getAction('controller');
-        if (!$action) {
+        if (! $action) {
             return $this->groupByPrefix($route);
         }
 
         $class = explode('@', $action)[0];
         $parts = array_values(array_filter(
             explode('\\', $class),
-            fn ($p) => !in_array(strtolower($p), ['app', 'http', 'controllers', 'api'], true)
+            fn ($p) => ! in_array(strtolower($p), ['app', 'http', 'controllers', 'api'], true)
         ));
 
         $last = end($parts);
@@ -177,19 +177,19 @@ class ApiSnapshotGenerator
 
     private function singularise(string $word): string
     {
-        $lower = strtolower($word);
+        $lower      = strtolower($word);
         $irregulars = [
-            'children' => 'child', 'people' => 'person', 'men' => 'man',
-            'women' => 'woman', 'teeth' => 'tooth', 'feet' => 'foot',
-            'mice' => 'mouse', 'geese' => 'goose',
+            'children' => 'child',  'people' => 'person', 'men'   => 'man',
+            'women'    => 'woman',  'teeth'  => 'tooth',  'feet'  => 'foot',
+            'mice'     => 'mouse',  'geese'  => 'goose',
         ];
 
         if (isset($irregulars[$lower])) return $irregulars[$lower];
         if (str_ends_with($lower, 'ies') && strlen($lower) > 3) return substr($word, 0, -3) . 'y';
         if (preg_match('/(s|x|z|ch|sh)es$/', $lower)) return substr($word, 0, -2);
         if (str_ends_with($lower, 'ves')) return substr($word, 0, -3) . 'f';
-        if (str_ends_with($lower, 's') && !str_ends_with($lower, 'ss')
-            && !str_ends_with($lower, 'us') && !str_ends_with($lower, 'is')
+        if (str_ends_with($lower, 's') && ! str_ends_with($lower, 'ss')
+            && ! str_ends_with($lower, 'us') && ! str_ends_with($lower, 'is')
             && strlen($lower) > 3) {
             return substr($word, 0, -1);
         }
@@ -249,7 +249,7 @@ class ApiSnapshotGenerator
         $methodName = $data['method'] ?? 'handle';
 
         $body = null;
-        if (in_array($httpMethod, ['POST', 'PUT', 'PATCH'], true) && !empty($data['bodyParams'])) {
+        if (in_array($httpMethod, ['POST', 'PUT', 'PATCH'], true) && ! empty($data['bodyParams'])) {
             $body = ['mode' => 'raw', 'raw' => $data['bodyParams']];
         }
 
@@ -274,7 +274,7 @@ class ApiSnapshotGenerator
     private function buildUrl(string $uri, array $pathVariables, array $queryParams): array
     {
         $rawQs = '';
-        if (!empty($queryParams)) {
+        if (! empty($queryParams)) {
             $pairs = array_map(
                 fn ($q) => rawurlencode($q['key']) . '=' . rawurlencode((string) ($q['value'] ?? '')),
                 $queryParams
@@ -289,7 +289,7 @@ class ApiSnapshotGenerator
             'raw'   => '{{baseUrl}}/' . $uri . $rawQs,
         ];
 
-        if (!empty($pathVariables)) {
+        if (! empty($pathVariables)) {
             $url['variable'] = $pathVariables;
         }
 

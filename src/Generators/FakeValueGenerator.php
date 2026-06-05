@@ -7,7 +7,19 @@ class FakeValueGenerator
     /** @param string[] $rules */
     public function generate(string $field, array $rules): mixed
     {
-        $rulesStr = strtolower(implode('|', $rules));
+        // Strip exists/unique rules before processing to avoid false positive
+        // matches on table names (e.g. "exists:doctor_profiles,id" contains
+        // the substring "file" from "profiles", triggering the file rule).
+        $cleanRules = array_filter($rules, function ($r) {
+            if (! is_string($r)) {
+                return true;
+            }
+            $lower = strtolower($r);
+            return ! str_starts_with($lower, 'exists:')
+                && ! str_starts_with($lower, 'unique:');
+        });
+
+        $rulesStr = strtolower(implode('|', $cleanRules));
 
         $hasTypeRule = $this->has($rulesStr, 'integer') || $this->has($rulesStr, 'numeric')
             || $this->has($rulesStr, 'boolean') || $this->has($rulesStr, 'string')
@@ -15,9 +27,13 @@ class FakeValueGenerator
             || $this->has($rulesStr, 'url')     || $this->has($rulesStr, 'uuid')
             || $this->has($rulesStr, 'array')   || (bool) preg_match('/\bin:/', $rulesStr);
 
-        if ($this->has($rulesStr, 'nullable') && !$hasTypeRule) return null;
+        if ($this->has($rulesStr, 'nullable') && ! $hasTypeRule) {
+            return null;
+        }
 
-        if ($this->has($rulesStr, 'boolean') || $this->has($rulesStr, 'bool')) return false;
+        if ($this->has($rulesStr, 'boolean') || $this->has($rulesStr, 'bool')) {
+            return false;
+        }
 
         if ($this->has($rulesStr, 'date') || $this->has($rulesStr, 'date_format')
             || $this->has($rulesStr, 'datetime')
@@ -33,7 +49,9 @@ class FakeValueGenerator
             return 'https://example.com';
         }
 
-        if ($this->has($rulesStr, 'uuid')) return '550e8400-e29b-41d4-a716-446655440000';
+        if ($this->has($rulesStr, 'uuid')) {
+            return '550e8400-e29b-41d4-a716-446655440000';
+        }
 
         if ($this->has($rulesStr, 'ip') || $this->has($rulesStr, 'ipv4') || $this->has($rulesStr, 'ipv6')) {
             return '192.168.1.1';
@@ -43,9 +61,13 @@ class FakeValueGenerator
             return 'file.jpg';
         }
 
-        if ($this->has($rulesStr, 'json')) return '{}';
+        if ($this->has($rulesStr, 'json')) {
+            return '{}';
+        }
 
-        if (preg_match('/\bin:([^|]+)/', $rulesStr, $m)) return trim(explode(',', $m[1])[0]);
+        if (preg_match('/\bin:([^|]+)/', $rulesStr, $m)) {
+            return trim(explode(',', $m[1])[0]);
+        }
 
         if ($this->has($rulesStr, 'integer') || $this->has($rulesStr, 'numeric')
             || $this->has($rulesStr, 'digits')
@@ -53,7 +75,9 @@ class FakeValueGenerator
             return $this->numericSample($rulesStr);
         }
 
-        if ($this->has($rulesStr, 'array')) return [];
+        if ($this->has($rulesStr, 'array')) {
+            return [];
+        }
 
         if ($this->hint($field, ['password', 'passwd', 'secret']))  return 'Password@123';
         if ($this->hint($field, ['phone', 'mobile', 'tel', 'fax'])) return '+989123456789';
@@ -67,7 +91,9 @@ class FakeValueGenerator
             return ($min !== null && $min > 1) ? str_repeat('a', min($min, 10)) : 'n';
         }
 
-        if ($this->has($rulesStr, 'required')) return $field . '_value';
+        if ($this->has($rulesStr, 'required')) {
+            return $field . '_value';
+        }
 
         return null;
     }
@@ -82,7 +108,9 @@ class FakeValueGenerator
     {
         $lower = strtolower($field);
         foreach ($hints as $h) {
-            if (str_contains($lower, $h)) return true;
+            if (str_contains($lower, $h)) {
+                return true;
+            }
         }
         return false;
     }
