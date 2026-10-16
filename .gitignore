@@ -8,3 +8,7 @@ composer.lock
 test_output.json
 *.cache
 .phpunit.result.cache
+
+# local development harness (its composer.json is committed, the install is not)
+/devtools/vendor/
+/devtools/composer.lock
