@@ -62,4 +62,36 @@ return [
         'prefix' => 'api_snapshot_',
     ],
 
+    // Integration tests written by "php artisan api-snapshot:tests".
+    'tests' => [
+        // auto | pest | phpunit. "auto" looks for pestphp/pest in composer.json.
+        'driver' => 'auto',
+
+        'output' => 'tests/Feature/ApiSnapshot',
+
+        // Only used by the PHPUnit driver.
+        'namespace' => 'Tests\\Feature\\ApiSnapshot',
+
+        'base_class' => 'Tests\\TestCase',
+
+        // How many route-group levels share one generated file.
+        'file_group_depth' => 1,
+
+        // "handled" rejects only a 5xx answer, "success" demands 2xx/3xx.
+        'expect' => 'handled',
+
+        // Also assert that a protected endpoint answers 401/403 without credentials.
+        'auth_denial_tests' => true,
+
+        // Add RefreshDatabase to every generated test.
+        'refresh_database' => true,
+
+        // Seeder classes run once per test, inside the transaction it is wrapped in.
+        'seeders' => [],
+
+        // A class implementing SwanFlutter\LaravelApiSnapshot\Testing\SnapshotAuthenticator.
+        // Without it every protected endpoint is skipped instead of faking a pass.
+        'authenticator' => null,
+    ],
+
 ];

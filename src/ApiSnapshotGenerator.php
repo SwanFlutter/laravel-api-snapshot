@@ -11,6 +11,8 @@ use SwanFlutter\LaravelApiSnapshot\Extractors\RuleExtractor;
 use SwanFlutter\LaravelApiSnapshot\Generators\FakeValueGenerator;
 use SwanFlutter\LaravelApiSnapshot\Support\ParamTree;
 use SwanFlutter\LaravelApiSnapshot\Support\Utf8;
+use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotEndpoint;
+use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotPayload;
 use Throwable;
 
 /**
@@ -541,6 +543,139 @@ class ApiSnapshotGenerator
         }
 
         return $word;
+    }
+
+    /**
+     * Every scannable route as an executable test case: concrete URI, a payload
+     * built from the extracted validation rules and the auth contract found on
+     * the middleware stack.
+     *
+     * @return list<SnapshotEndpoint>
+     */
+    public function scanEndpoints(): array
+    {
+        $this->warnings      = [];
+        $routes              = $this->collectRoutes();
+        $this->namespaceRoot = $this->commonNamespaceRoot($routes);
+
+        $endpoints = [];
+
+        foreach ($routes as $route) {
+            foreach ($this->buildEndpoints($route, $this->groupSegments($route)) as $endpoint) {
+                $endpoints[] = $endpoint;
+            }
+        }
+
+        usort($endpoints, fn (SnapshotEndpoint $a, SnapshotEndpoint $b) => [$a->group, $a->uri, $a->method]
+            <=> [$b->group, $b->uri, $b->method]);
+
+        return $endpoints;
+    }
+
+    /**
+     * @param  list<string>  $group
+     * @return list<SnapshotEndpoint>
+     */
+    private function buildEndpoints(Route $route, array $group): array
+    {
+        try {
+            $data = $this->routeExtractor->extract($route);
+        } catch (Throwable $exception) {
+            $this->warnings[] = sprintf(
+                'Route "%s" could not be inspected (%s) and was skipped.',
+                $route->uri(),
+                $exception->getMessage(),
+            );
+
+            return [];
+        }
+
+        $payload   = SnapshotPayload::fromTree($data['bodyTree'], $this->fakeValues);
+        $tree      = $data['bodyTree'];
+        $uri       = $this->concreteUri($data['uri'], $data['pathVariables']);
+        $groupLabel = implode(' › ', $group);
+
+        $endpoints = [];
+
+        foreach ($this->httpMethods($route) as $httpMethod) {
+            $readOnly = $this->isReadOnly($httpMethod);
+
+            $endpoints[] = new SnapshotEndpoint(
+                method: strtoupper($httpMethod),
+                uri: $uri,
+                query: $readOnly ? $payload : [],
+                body: $readOnly ? [] : $payload,
+                multipart: ! $readOnly && $tree !== null && $tree->containsFile(),
+                authRequired: (bool) $data['authRequired'],
+                surface: $this->surface($data['middleware'], $group),
+                group: $groupLabel,
+                action: (string) $data['actionName'],
+                middleware: array_values(array_map('strval', (array) $data['middleware'])),
+                expectation: $this->expectation(),
+            );
+        }
+
+        return $endpoints;
+    }
+
+    /**
+     * Path placeholders replaced by the same sample values the Postman
+     * collection uses, so the generated URI can be requested as it is.
+     *
+     * @param  list<array<string, mixed>>  $pathVariables
+     */
+    private function concreteUri(string $uri, array $pathVariables): string
+    {
+        $values = [];
+
+        foreach ($pathVariables as $variable) {
+            $values[(string) $variable['key']] = (string) ($variable['value'] ?? '');
+        }
+
+        $concrete = preg_replace_callback(
+            '/\{(\w+)(?::[^}]*)?\??\}/',
+            fn (array $matches) => $values[$matches[1]] ?? $matches[1],
+            $uri,
+        ) ?? $uri;
+
+        return '/' . ltrim(preg_replace('#//+#', '/', $concrete) ?? $concrete, '/');
+    }
+
+    /**
+     * The identity an endpoint expects, taken from the guard or role middleware
+     * when there is one and from the first folder otherwise.
+     *
+     * @param  list<string>  $middleware
+     * @param  list<string>  $group
+     */
+    private function surface(array $middleware, array $group): string
+    {
+        foreach ($middleware as $name) {
+            $name = (string) $name;
+            $base = strtolower(strtok($name, ':') ?: $name);
+            $arg  = str_contains($name, ':') ? trim(substr($name, strpos($name, ':') + 1)) : '';
+
+            if (in_array($base, ['role', 'permission'], true) && $arg !== '') {
+                // "role:admin|super_admin" and "permission:edit posts|admin" describe one
+                // audience with alternatives, so the first name is the surface.
+                return trim(explode('|', explode(',', $arg)[0])[0]) ?: $arg;
+            }
+
+            if ($base === 'auth' && $arg !== '' && ! in_array($arg, ['sanctum', 'web', 'api', 'guard'], true)) {
+                return $arg;
+            }
+        }
+
+        return strtolower(str_replace(' ', '-', $group[0] ?? 'general'));
+    }
+
+    private function expectation(): string
+    {
+        $expect = strtolower((string) ($this->config['tests']['expect'] ?? SnapshotEndpoint::EXPECT_HANDLED));
+
+        return $expect === SnapshotEndpoint::EXPECT_SUCCESS
+            ? SnapshotEndpoint::EXPECT_SUCCESS
+            : SnapshotEndpoint::EXPECT_HANDLED;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

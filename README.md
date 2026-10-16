@@ -6,6 +6,7 @@
 [![Packagist](https://img.shields.io/packagist/v/swanflutter/laravel-api-snapshot.svg?style=flat-square)](https://packagist.org/packages/swanflutter/laravel-api-snapshot)
 
 **Laravel API Snapshot** scans all your registered API routes and generates a **Postman Collection v2.1 JSON** file automatically — similar to Scribe but focused purely on Postman export.
+The same scan can also be written out as a runnable **integration test suite**, so every route is called at least once on each `php artisan test`.
 
 ---
 
@@ -23,6 +24,10 @@
 - Caches the collection and clears it with a dedicated command
 - Persian/Farsi auto-descriptions (configurable)
 - Artisan command with flexible CLI options
+- Turns the same scan into an executable **integration test suite** (Pest or PHPUnit) that calls
+  every route and asserts no endpoint answers with a server error
+- Sets up the test environment a generated suite needs: `.env.testing`, `phpunit.xml`, a SQLite
+  file, seeders and an authenticator stub
 
 ---
 
@@ -50,6 +55,14 @@ php artisan api-snapshot:generate
 
 Writes `postman_collection.json` to your project root. Import it directly into Postman.
 
+To turn the same routes into tests:
+
+```bash
+php artisan api-snapshot:install-testing   # prepare .env.testing, phpunit.xml, seeders
+php artisan api-snapshot:tests             # write the test files
+./vendor/bin/pest                          # run them
+```
+
 ---
 
 ## Command Options
@@ -73,6 +86,33 @@ php artisan api-snapshot:generate [options]
   --clear-cache   Drop cached snapshots before generating
 
 php artisan api-snapshot:clear-cache   # remove every cached snapshot
+
+php artisan api-snapshot:tests [options]        # generate the integration suite
+  --driver=         pest | phpunit | auto       (auto detects Pest from composer.json)
+  --output=         Directory for the test files (default: tests/Feature/ApiSnapshot)
+  --file-depth=     Route-group levels that make one file (default: 1 → one file per folder)
+  --expect=         handled (no 5xx) | success (2xx/3xx)
+  --namespace=      Namespace of the generated PHPUnit classes
+  --include= --paths= --exclude= --all --group-by= --depth= --no-fakes
+                    Same route-selection options as api-snapshot:generate
+  --no-auth-tests   Leave out the "rejects a request without credentials" cases
+  --no-refresh-db   Do not add RefreshDatabase to the generated files
+  --no-prune        Keep files whose endpoint no longer exists
+  --dry-run         Report the plan without writing anything
+  --force           Overwrite existing files without prompting
+
+php artisan api-snapshot:install-testing [options]   # prepare the test environment
+  --connection=     Test database connection  (default: sqlite)
+  --database=       Test database name        (default: :memory:)
+  --db-file=        Use this SQLite file instead of :memory: and create it when missing
+  --seeders=        Comma-separated seeder classes to run before each test
+  --authenticator=  Class that signs a test in for a protected endpoint
+  --with-authenticator-stub   Write a starter authenticator into tests/Support
+  --publish         Publish config/api-snapshot.php so the settings above can be stored
+  --no-env          Do not write .env.testing
+  --no-phpunit      Do not touch phpunit.xml
+  --dry-run         Report the changes without writing anything
+  --force           Replace values that are already set
 ```
 
 ### Examples
@@ -101,6 +141,18 @@ php artisan api-snapshot:generate --no-fakes
 
 # English descriptions
 php artisan api-snapshot:generate --no-persian
+
+# Integration tests for the patient API only, planned but not written
+php artisan api-snapshot:tests --paths=api/v1/patient --dry-run
+
+# One file per two group levels, and every endpoint must answer 2xx/3xx
+php artisan api-snapshot:tests --file-depth=2 --expect=success
+
+# PHPUnit classes instead of Pest files
+php artisan api-snapshot:tests --driver=phpunit --namespace="Tests\\Feature\\Api"
+
+# Prepare the test database, then generate against it
+php artisan api-snapshot:install-testing --db-file=database/test.sqlite --seeders="RolePermissionSeeder" --authenticator="Tests\\Support\\SnapshotAuthenticator"
 ```
 
 ---
@@ -150,6 +202,20 @@ return [
         'ttl'     => env('API_SNAPSHOT_CACHE_TTL', 3600),
         'prefix'  => 'api_snapshot_',
     ],
+
+    // Options used by api-snapshot:tests (see the Integration Tests section).
+    'tests' => [
+        'driver'            => 'auto',    // auto | pest | phpunit
+        'output'            => 'tests/Feature/ApiSnapshot',
+        'namespace'         => 'Tests\\Feature\\ApiSnapshot',
+        'base_class'        => 'Tests\\TestCase',
+        'file_group_depth'  => 1,
+        'expect'            => 'handled', // handled | success
+        'auth_denial_tests' => true,
+        'refresh_database'  => true,
+        'seeders'           => [],
+        'authenticator'     => null,
+    ],
 ];
 ```
 
@@ -157,6 +223,119 @@ The cache key is a fingerprint of the effective config plus the route list, so c
 `--base-url`, `--paths` or `--group-by` never serves a stale collection. If the app's cache
 store is unreachable (a database cache with the database down, for example), the command
 warns and generates without it rather than failing.
+
+---
+
+## Integration Tests
+
+`api-snapshot:tests` runs the same scanner as `api-snapshot:generate` and writes the endpoints it
+finds out as ordinary test files. Each file holds one `SnapshotEndpoint` case per route — the
+concrete URI, the sample payload built from the validation rules, the auth contract discovered
+from the middleware — plus a test that calls it:
+
+```php
+use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotEndpoint;
+use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotRequests;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+uses(RefreshDatabase::class);
+
+$getApiV1AdminUsersStatus = new SnapshotEndpoint(
+    method: 'GET',
+    uri: '/api/v1/admin/users/1/status',
+    query: [],
+    body: [],
+    multipart: false,
+    authRequired: true,
+    surface: 'admin',
+    group: 'Admin › User',
+    action: 'App\\Http\\Controllers\\Admin\\UserController@status',
+    middleware: ['api', 'auth:sanctum', 'role:admin'],
+    expectation: SnapshotEndpoint::EXPECT_HANDLED,
+);
+
+it('Admin › User › GET /api/v1/admin/users/1/status responds without a server error', function () use ($getApiV1AdminUsersStatus) {
+    SnapshotRequests::run($this, $getApiV1AdminUsersStatus);
+});
+
+it('Admin › User › GET /api/v1/admin/users/1/status rejects a request without credentials', function () use ($getApiV1AdminUsersStatus) {
+    SnapshotRequests::runUnauthenticated($this, $getApiV1AdminUsersStatus);
+});
+```
+
+The files stay readable and diffable: nothing runs through eval, the generated code calls the
+documented public API of the package, and every case keeps the payload the scanner produced.
+
+### What the tests assert
+
+- `expect => handled` (the default) fails only on a 5xx answer, so a made-up ID, an `exists` rule
+  or a 404 from missing fixtures reports a real server bug rather than a fake failure.
+- `expect => success` additionally demands 2xx/3xx and needs real data — use it once the
+  authenticator and seeders make the endpoints answer properly.
+- Protected endpoints always get a second test that sends the request with no credentials and
+  expects 401/403 (`auth_denial_tests => false` drops it).
+- A protected endpoint whose surface the authenticator cannot sign in is **skipped with a
+  message**, never silently passed.
+
+### Signing requests in
+
+The package does not know how your app issues credentials, so the generated tests ask a class of
+yours:
+
+```php
+namespace Tests\Support;
+
+use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotAuthenticator as SnapshotAuthenticatorContract;
+use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotEndpoint;
+
+class SnapshotAuthenticator implements SnapshotAuthenticatorContract
+{
+    public function authenticate(object $test, SnapshotEndpoint $endpoint): ?array
+    {
+        return match ($endpoint->surface) {
+            'admin'  => $this->admin($test) ? [] : null,
+            'doctor' => $this->doctor($test) ? [] : null,
+            default  => null,   // null → the test is skipped, not faked
+        };
+    }
+}
+```
+
+Return `[]` after signing the test in yourself (`$test->be($user)`, `Sanctum::actingAs($user)`),
+or a header array such as `['Authorization' => 'Bearer ' . $token]` — the runtime merges it with
+`Accept: application/json`. `surface` is the first name taken from the `role:`/`permission:`/guard argument of the route
+middleware (`role:admin|super_admin` → `admin`), so it is what your app already calls the audience. Point
+`config('api-snapshot.tests.authenticator')` at the class, or start from a scaffold:
+
+```bash
+php artisan api-snapshot:install-testing --authenticator="Tests\\Support\\SnapshotAuthenticator" --with-authenticator-stub
+```
+
+### Test environment
+
+`api-snapshot:install-testing` writes what the generated suite needs and never overwrites a value
+you already set unless you pass `--force`:
+
+- `.env.testing` with `APP_ENV=testing`, `DB_CONNECTION`, `DB_DATABASE`, `CACHE_STORE=array`,
+  `SESSION_DRIVER=array`, `QUEUE_CONNECTION=sync`, `MAIL_MAILER=array`, and the `APP_KEY` copied
+  from your environment. Because Laravel loads *only* `.env.testing` once it exists, a missing one
+  starts as a copy of `.env`, so the other values the app reads never disappear.
+- The matching `<env>` entries in `phpunit.xml`.
+- `database/test.sqlite` (or `--db-file=`) when you choose a file instead of `:memory:`.
+- `tests.seeders` and `tests.authenticator` inside `config/api-snapshot.php` (`--publish` writes
+  the file first if it is not published).
+
+`seeders` are the classes run before the first request of each test, inside the transaction
+`RefreshDatabase` opens — put `RolePermissionSeeder` or any lookup-data seeder there so roles and
+permissions exist when a `role:admin` route is called.
+
+### Regenerating
+
+Generation is idempotent: the command writes `_snapshot-manifest.json` next to the files and, on
+the next run, deletes only generated files it recognises (their header contains
+`api-snapshot:tests`) whose endpoints no longer exist. Hand-written tests are never touched, and
+`--no-prune` keeps the stale files too. `--dry-run` prints the plan — file, endpoint count, test
+count — without writing anything.
 
 ---
 
@@ -290,7 +469,10 @@ devtools/vendor/bin/phpunit
 
 `devtools/` is gitignored; `tests/` contains a real Testbench application (routes, FormRequests,
 inline validation, uploads, closures and an invokable controller) that exercises the generator
-end to end: Postman format, route discovery, rule extraction, grouping and caching.
+end to end: Postman format, route discovery, rule extraction, grouping and caching. The test mode
+is covered the same way — the scanner's endpoint list, every generated file checked with
+`php -l`, the install command against a scratch project, and the generated cases actually sent
+through `SnapshotRequests` against the Testbench app.
 
 ---
 

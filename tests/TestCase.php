@@ -37,7 +37,7 @@ abstract class TestCase extends TestbenchTestCase
 
             $router->get('admin/users/{user}/status', function (string $user) {
                 return ['user' => $user];
-            })->middleware(['auth:sanctum', 'role:admin']);
+            })->middleware(['auth:sanctum', 'role:admin|super_admin']);
 
             $router->get('horizon/jobs', function () {
                 return [];
