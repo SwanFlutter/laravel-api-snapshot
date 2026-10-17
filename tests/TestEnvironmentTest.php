@@ -221,6 +221,27 @@ final class TestEnvironmentTest extends TestCase
     }
 
     #[Test]
+    public function it_keeps_the_copied_env_out_of_git(): void
+    {
+        file_put_contents($this->sandbox . '/.env', "APP_KEY=base64:secret\n");
+        file_put_contents($this->sandbox . '/.gitignore', "/vendor\n.env\n");
+
+        $changes = $this->environment()->ignoreEnvFile();
+
+        $this->assertSame(['.gitignore: added .env.testing'], $changes);
+        $this->assertStringContainsString("/vendor\n.env\n.env.testing\n", (string) file_get_contents($this->sandbox . '/.gitignore'));
+
+        // A second setup run must not repeat the entry.
+        $this->assertSame([], $this->environment()->ignoreEnvFile());
+        $this->assertSame(1, substr_count((string) file_get_contents($this->sandbox . '/.gitignore'), '.env.testing'));
+
+        // Nothing to patch when the project has no .gitignore.
+        @unlink($this->sandbox . '/.gitignore');
+
+        $this->assertSame([], $this->environment()->ignoreEnvFile());
+    }
+
+    #[Test]
     public function dry_run_reports_without_writing(): void
     {
         $this->environment(dryRun: true)->patchEnv(TestEnvironment::defaults());

@@ -58,6 +58,7 @@ class SnapshotInstallTestingCommand extends Command
 
         if (! $this->option('no-env')) {
             $changes = array_merge($changes, $environment->patchEnv($values));
+            $changes = array_merge($changes, $environment->ignoreEnvFile());
         }
 
         if (! $this->option('no-phpunit')) {

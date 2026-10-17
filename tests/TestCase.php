@@ -31,8 +31,11 @@ abstract class TestCase extends TestbenchTestCase
             $router->put('patients/{id}', [PatientController::class, 'update']);
 
             $router->post('reports/generate', [ReportController::class, 'generate']);
+            $router->post('reports/days', [ReportController::class, 'days']);
             $router->get('panel/staff/{staff}/attendance', [StaffAttendanceController::class, 'show']);
             $router->post('attachments', [AttachmentController::class, 'store']);
+            $router->post('attachments/poster', [AttachmentController::class, 'poster']);
+            $router->post('attachments/logo', [AttachmentController::class, 'logo']);
             $router->get('health', HealthController::class);
 
             $router->get('admin/users/{user}/status', function (string $user) {

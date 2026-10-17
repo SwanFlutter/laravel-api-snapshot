@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SwanFlutter\LaravelApiSnapshot\Tests;
 
 use PHPUnit\Framework\Attributes\Test;
+use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotEndpoint;
 use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotTestGenerator;
 
 final class TestFileRendererTest extends TestCase
@@ -48,6 +49,32 @@ final class TestFileRendererTest extends TestCase
         $this->assertStringContainsString('new SnapshotEndpoint(', $files['AdminTest.php']);
         $this->assertStringContainsString("it('Admin", $files['AdminTest.php']);
         $this->assertStringContainsString('rejects a request without credentials', $files['AdminTest.php']);
+    }
+
+    #[Test]
+    public function the_case_title_states_the_expectation_of_its_own_endpoint(): void
+    {
+        $pest = $this->renderPest('Report', [
+            new SnapshotEndpoint(method: 'GET', uri: '/api/v1/reports/days', group: 'Report', action: 'Days'),
+            new SnapshotEndpoint(method: 'POST', uri: '/api/v1/reports/generate', group: 'Report', action: 'Generate', expectation: SnapshotEndpoint::EXPECT_SUCCESS),
+        ]);
+
+        $this->assertStringContainsString('GET /api/v1/reports/days responds without a server error', $pest);
+        $this->assertStringContainsString('POST /api/v1/reports/generate responds successfully', $pest);
+    }
+
+    /**
+     * @param  list<SnapshotEndpoint>  $endpoints
+     */
+    private function renderPest(string $bucket, array $endpoints): string
+    {
+        $method = new \ReflectionMethod(SnapshotTestGenerator::class, 'renderPest');
+
+        return $method->invoke(
+            new SnapshotTestGenerator(['file_group_depth' => 1], SnapshotTestGenerator::DRIVER_PEST),
+            $bucket,
+            $endpoints,
+        );
     }
 
     #[Test]

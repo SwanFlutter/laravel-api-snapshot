@@ -100,6 +100,39 @@ final class TestEnvironment
     }
 
     /**
+     * A `.env.testing` copied from `.env` carries the real app key and every
+     * third-party secret next to it, so it belongs in .gitignore.
+     *
+     * @return list<string>
+     */
+    public function ignoreEnvFile(string $relative = '.env.testing'): array
+    {
+        $before = count($this->changes);
+
+        $path = $this->basePath . DIRECTORY_SEPARATOR . '.gitignore';
+
+        if (! is_readable($path)) {
+            return $this->since($before);
+        }
+
+        $lines = file($path, FILE_IGNORE_NEW_LINES) ?: [];
+
+        if (in_array($relative, $lines, true)) {
+            return $this->since($before);
+        }
+
+        $this->write($path, implode("\n", $lines) . "\n" . $relative . "\n");
+
+        if (! $this->dryRun) {
+            $this->changes[] = '.gitignore: added ' . $relative;
+        } else {
+            $this->changes[] = 'would add ' . $relative . ' to .gitignore';
+        }
+
+        return $this->since($before);
+    }
+
+    /**
      * @param  array<string, string>  $values
      * @return list<string>
      */

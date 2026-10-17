@@ -27,4 +27,27 @@ class ReportController extends Controller
             'include_total' => 'boolean',
         ]);
     }
+
+    /**
+     * روزهای باز یک بازه.
+     *
+     * A date field whose rules live in a shared helper the scanner has to follow.
+     */
+    public function days(Request $request): array
+    {
+        return $request->validate([
+            'day'      => ['required', ...$this->gregorianDateRules()],
+            'position' => ['required', 'string'],
+            'period'   => ['nullable', 'string'],
+        ]);
+    }
+
+    /** @return list<string> */
+    protected function gregorianDateRules(): array
+    {
+        return [
+            'date_format:Y-m-d',
+            'regex:/^(19|20)\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/',
+        ];
+    }
 }

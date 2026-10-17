@@ -132,6 +132,42 @@ final class ValidationRulesTest extends TestCase
     }
 
     /**
+     * "digits:10" counts digits instead of fixing a magnitude, and an integer
+     * that long is past a 32-bit build, so the sample stays a string of digits.
+     */
+    #[Test]
+    public function it_counts_digits_of_a_digits_rule(): void
+    {
+        $generator = new FakeValueGenerator();
+
+        $this->assertSame(111111, $generator->generate('code', ['required', 'digits:6']));
+        $this->assertSame('1111111111', $generator->generate('national_code', ['required', 'string', 'digits:10']));
+        $this->assertSame(11111111, $generator->generate('card', ['digits_between:6,10']));
+    }
+
+    /**
+     * A strength pattern is built from assertions, and an assertion consumes
+     * nothing, so walking it cannot produce a passing value — the field's own
+     * format can.
+     */
+    #[Test]
+    public function it_uses_the_field_format_for_a_regex_built_from_assertions(): void
+    {
+        $generator = new FakeValueGenerator();
+
+        $strong = '/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/';
+
+        $this->assertSame(
+            'Password@123',
+            $generator->generate('password', ['required', 'string', 'min:8', 'regex:' . $strong]),
+        );
+        $this->assertSame(
+            'aaaaaaaa',
+            $generator->generate('code', ['regex:/^(?=.*[a-z])[a-z]{8}$/']),
+        );
+    }
+
+    /**
      * "string|max:15" fixes a length, not a format, so a field called phone
      * still deserves a phone number — as long as the sample fits the rule.
      */

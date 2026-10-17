@@ -29,6 +29,12 @@ class InlineRuleExtractor
         'get'     => 'string',
     ];
 
+    /** Rules a field spreads in from a helper: "date" => ["required", ...$this->dateRules()]. */
+    private const SPREAD_PATTERN = '/^\.\.\.\s*\$this->([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)$/';
+
+    /** Helpers already expanded, so two methods spreading each other cannot recurse. */
+    private array $expanding = [];
+
     /** @return array<string, list<string>> */
     public function extract(string $className, string $methodName): array
     {
@@ -46,7 +52,7 @@ class InlineRuleExtractor
             $arguments = $this->arguments(substr($body, $match[1] + strlen($match[0])));
 
             foreach ($arguments as $argument) {
-                $rules = $this->rulesFromArray($argument);
+                $rules = $this->rulesFromArray($argument, $className);
 
                 if ($rules !== []) {
                     return $rules;
@@ -122,7 +128,7 @@ class InlineRuleExtractor
     }
 
     /** @return array<string, list<string>> */
-    private function rulesFromArray(string $expression): array
+    private function rulesFromArray(string $expression, string $class = ''): array
     {
         $expression = trim($expression);
 
@@ -148,7 +154,7 @@ class InlineRuleExtractor
                 continue;
             }
 
-            $parsed = $this->rules($value);
+            $parsed = $this->rules($value, $class);
 
             if ($parsed !== []) {
                 $rules[$field] = $parsed;
@@ -161,7 +167,7 @@ class InlineRuleExtractor
     /**
      * @return list<string>
      */
-    private function rules(string $expression): array
+    private function rules(string $expression, string $class = ''): array
     {
         $expression = trim($expression);
 
@@ -175,7 +181,7 @@ class InlineRuleExtractor
                     return [];
                 }
 
-                foreach ($this->rules($item) as $rule) {
+                foreach ($this->rules($item, $class) as $rule) {
                     $result[] = $rule;
                 }
             }
@@ -189,7 +195,46 @@ class InlineRuleExtractor
             return RuleParser::split($scalar);
         }
 
+        // "…$this->dateRules()": the one list of rules every field of that format
+        // shares. Its source is read like any other, so a spread reaches the
+        // sample generator instead of vanishing from the snapshot.
+        if (preg_match(self::SPREAD_PATTERN, $expression, $match) === 1) {
+            return $this->helperRules($match[1], $class);
+        }
+
         return $this->describeBuilder($expression);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function helperRules(string $method, string $class): array
+    {
+        if ($class === '' || isset($this->expanding[$method])) {
+            return [];
+        }
+
+        $this->expanding[$method] = true;
+
+        try {
+            $body = $this->methodBody($class, $method);
+
+            if ($body === null || preg_match('/return\s*(\[)/', $body, $match, PREG_OFFSET_CAPTURE) !== 1) {
+                return [];
+            }
+
+            $rules = [];
+
+            foreach ($this->split($this->balanced(substr($body, $match[1][1]), '[') ?? '', ',') as $item) {
+                foreach ($this->rules($item, $class) as $rule) {
+                    $rules[] = $rule;
+                }
+            }
+
+            return $rules;
+        } finally {
+            unset($this->expanding[$method]);
+        }
     }
 
     /**

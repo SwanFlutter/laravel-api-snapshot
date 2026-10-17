@@ -2,7 +2,9 @@
 
 namespace SwanFlutter\LaravelApiSnapshot\Testing;
 
+use Carbon\Carbon;
 use Illuminate\Http\Testing\File;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use PHPUnit\Framework\Assert;
 use Illuminate\Support\Facades\Artisan;
@@ -17,6 +19,15 @@ final class SnapshotRequests
 {
     /** Marks a payload value that must be swapped for a fake uploaded file. */
     public const FILE_MARKER = 'snapshot-file://';
+
+    /** Marks a payload value that must be swapped for a real row of the database. */
+    public const REFERENCE_MARKER = 'snapshot-ref://';
+
+    /** Marks a date that only exists once the request is actually sent. */
+    public const DYNAMIC_MARKER = 'snapshot-dynamic://';
+
+    /** Size of the upload a file marker asks for. */
+    private const UPLOAD_KILOBYTES = 12;
 
     private static ?WeakMap $prepared = null;
 
@@ -55,7 +66,9 @@ final class SnapshotRequests
     {
         self::prepare($test);
 
-        $data    = self::withFakeUploads($endpoint->payload());
+        $data    = self::materialise(
+            SnapshotOverrides::apply($endpoint->payload(), SnapshotOverrides::latePayload($endpoint)),
+        );
         $headers = array_replace(['Accept' => 'application/json'], $headers);
         $uri     = '/' . ltrim($endpoint->uri, '/');
 
@@ -168,23 +181,94 @@ final class SnapshotRequests
     }
 
     /**
-     * Turns FILE_MARKER strings into fake uploads, wherever they sit in the
-     * payload, and leaves everything else untouched.
+     * Turns the payload markers into what the request actually needs: a fake
+     * upload for {@see self::FILE_MARKER}, the lowest real id of the referenced
+     * table for {@see self::REFERENCE_MARKER}, today's neighbourhood for
+     * {@see self::DYNAMIC_MARKER}.
+     *
+     * An empty table answers 1, because in success mode that means the fixture
+     * seeder has not run — and the resulting 422 names the field to seed.
      */
-    private static function withFakeUploads(array $data): array
+    private static function materialise(array $data): array
     {
         foreach ($data as $key => $value) {
             if (is_array($value)) {
-                $data[$key] = self::withFakeUploads($value);
+                $data[$key] = self::materialise($value);
                 continue;
             }
 
-            if (is_string($value) && str_starts_with($value, self::FILE_MARKER)) {
-                $data[$key] = File::create(substr($value, strlen(self::FILE_MARKER)), 12);
+            if (! is_string($value)) {
+                continue;
+            }
+
+            if (str_starts_with($value, self::FILE_MARKER)) {
+                $data[$key] = self::upload(substr($value, strlen(self::FILE_MARKER)));
+            } elseif (str_starts_with($value, self::REFERENCE_MARKER)) {
+                $data[$key] = self::referenceValue(substr($value, strlen(self::REFERENCE_MARKER)));
+            } elseif (str_starts_with($value, self::DYNAMIC_MARKER)) {
+                $data[$key] = self::dynamicValue(substr($value, strlen(self::DYNAMIC_MARKER)), $data);
             }
         }
 
         return $data;
+    }
+
+    /**
+     * "snapshot-dynamic://<offset>/<format>[/<sibling>]" resolved against the
+     * clock, or against the sibling field the rules compare this one with. Keys
+     * are visited in payload order, so a sibling declared earlier arrives here
+     * already resolved.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private static function dynamicValue(string $specification, array $context): string
+    {
+        $parts = array_pad(explode('/', $specification, 3), 3, '');
+
+        $offset   = rawurldecode($parts[0]);
+        $format   = $parts[1] === '' ? 'Y-m-d' : rawurldecode($parts[1]);
+        $sibling  = $parts[2] === '' ? null : rawurldecode($parts[2]);
+        $moment   = $sibling === null ? null : self::dateOf($context[$sibling] ?? null);
+
+        return ($moment ?? Carbon::now())->modify($offset)->format($format);
+    }
+
+    private static function dateOf(mixed $value): ?Carbon
+    {
+        if (! is_string($value) || $value === '' || str_starts_with($value, self::DYNAMIC_MARKER)) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value);
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * The upload a file marker asks for. An image carries real header bytes:
+     * a controller that measures the file with `getimagesize()` rejects an
+     * empty one, and the sample has to pass the same check the app's form does.
+     */
+    private static function upload(string $name): File
+    {
+        $image = FakeImage::of(pathinfo($name, PATHINFO_EXTENSION), self::UPLOAD_KILOBYTES);
+
+        return $image === null
+            ? File::create($name, self::UPLOAD_KILOBYTES)
+            : File::createWithContent($name, $image);
+    }
+
+    private static function referenceValue(string $reference): mixed
+    {
+        [$table, $column] = array_pad(explode('/', $reference, 2), 2, 'id');
+
+        try {
+            return DB::table($table)->orderBy($column)->value($column) ?? 1;
+        } catch (Throwable) {
+            return 1;
+        }
     }
 
     /** @param list<int>|null $allowed */
@@ -206,7 +290,9 @@ final class SnapshotRequests
             $lines[] = 'middleware: ' . implode(', ', $endpoint->middleware);
         }
 
-        $exception = $response->exception;
+        // A streamed download response carries no exception at all, and asking
+        // for the property would raise one inside the failure message itself.
+        $exception = isset($response->exception) ? $response->exception : null;
 
         if ($exception instanceof Throwable) {
             $lines[] = sprintf(

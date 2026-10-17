@@ -53,9 +53,15 @@ class FakeValueGenerator
         $type    = $this->resolveType($field, $indexed);
 
         // A plain "string" rule says nothing about the format, so a field name
-        // such as "per_page" is still allowed to pick a more precise sample.
+        // such as "per_page" is still allowed to pick a more precise sample —
+        // but never one that stops being a string: "position" and "message" are
+        // strings to the validator whatever their names look like.
         if ($type === 'string' && $this->isBareString($indexed)) {
-            $type = $this->typeFromFieldName($field) ?? $type;
+            $hint = $this->typeFromFieldName($field);
+
+            if ($hint !== null && ($this->isTextualHint($hint) || ! $this->has($indexed, 'string'))) {
+                $type = $hint;
+            }
         } elseif ($type === 'string') {
             // The rules do fix a length: only a fixed-format sample that still
             // fits may replace the value derived from the field name.
@@ -158,6 +164,15 @@ class FakeValueGenerator
     }
 
     /**
+     * Whether a name-derived sample is still a string, so it may replace a plain
+     * "string" rule without contradicting it.
+     */
+    private function isTextualHint(string $hint): bool
+    {
+        return in_array($hint, ['email', 'phone', 'password', 'uuid', 'slug', 'url', 'date', 'string'], true);
+    }
+
+    /**
      * True when the only type rule is a plain "string", with nothing that
      * constrains the shape of the value.
      *
@@ -165,7 +180,7 @@ class FakeValueGenerator
      */
     private function isBareString(array $indexed): bool
     {
-        foreach (['size', 'min', 'max', 'regex', 'alpha', 'alpha_num', 'in', 'digits', 'digits_between'] as $rule) {
+        foreach (['size', 'min', 'max', 'between', 'regex', 'alpha', 'alpha_num', 'in', 'digits', 'digits_between'] as $rule) {
             if ($this->has($indexed, $rule)) {
                 return false;
             }
@@ -189,14 +204,34 @@ class FakeValueGenerator
         }
 
         $sample = strlen(self::FIXED_SAMPLES[$type]);
-        $min    = $this->number($indexed, 'min');
-        $max    = $this->number($indexed, 'max');
+        $min    = $this->bound($indexed, 'min');
+        $max    = $this->bound($indexed, 'max');
 
         return ($min === null || $sample >= $min) && ($max === null || $sample <= $max);
     }
 
+    /**
+     * A range bound. "between:1,12" states the same limits as "min:1|max:12", so
+     * a sample that respects one respects the other.
+     *
+     * @param array<string,string|null> $indexed
+     */
+    private function bound(array $indexed, string $which): ?float
+    {
+        $value = $this->number($indexed, $which);
+
+        if ($value !== null || ! $this->has($indexed, 'between')) {
+            return $value;
+        }
+
+        $bounds = array_map('trim', explode(',', (string) $indexed['between']));
+        $bound  = $bounds[$which === 'max' ? 1 : 0] ?? null;
+
+        return is_numeric($bound) ? (float) $bound : null;
+    }
+
     /** @param array<string, string|null> $indexed */
-    private function integer(array $indexed, string $field = ''): int
+    private function integer(array $indexed, string $field = ''): int|string
     {
         if ($this->has($indexed, 'in')) {
             return (int) $this->firstOption((string) $indexed['in']);
@@ -207,13 +242,19 @@ class FakeValueGenerator
         }
 
         if ($this->has($indexed, 'digits')) {
-            $digits = max(1, (int) trim((string) $indexed['digits']));
-
-            return (int) substr(str_repeat('1', $digits), 0, 9);
+            return $this->digitString(max(1, (int) trim((string) $indexed['digits'])));
         }
 
-        $min = $this->number($indexed, 'min');
-        $max = $this->number($indexed, 'max');
+        // "digits_between" counts digits, not magnitude: 8 passes min:6,max:10
+        // only as an eight-digit number.
+        if ($this->has($indexed, 'digits_between')) {
+            [$low, $high] = $this->digitRange((string) $indexed['digits_between']);
+
+            return $this->digitString(intdiv($low + $high, 2));
+        }
+
+        $min = $this->bound($indexed, 'min');
+        $max = $this->bound($indexed, 'max');
 
         if ($min === null && $max === null && $field !== '' && $this->matchesHint(strtolower($field), 'page')) {
             return 1;
@@ -227,6 +268,28 @@ class FakeValueGenerator
         };
     }
 
+    /**
+     * A value made of exactly $count digits. Kept as a string past nine digits
+     * so a 32-bit PHP never loses precision on e.g. a national code.
+     */
+    private function digitString(int $count): int|string
+    {
+        $digits = str_repeat('1', max(1, $count));
+
+        return strlen($digits) <= 9 ? (int) $digits : $digits;
+    }
+
+    /** @return array{0: int, 1: int} */
+    private function digitRange(string $parameter): array
+    {
+        $bounds = array_map('intval', array_slice(explode(',', $parameter), 0, 2));
+
+        $low  = max(1, $bounds[0] ?? 1);
+        $high = max($low, $bounds[1] ?? $low);
+
+        return [$low, $high];
+    }
+
     /** @param array<string, string|null> $indexed */
     private function numeric(array $indexed): float|int
     {
@@ -235,8 +298,8 @@ class FakeValueGenerator
         }
 
         $decimals = $this->number($indexed, 'decimal');
-        $min      = $this->number($indexed, 'min');
-        $max      = $this->number($indexed, 'max');
+        $min      = $this->bound($indexed, 'min');
+        $max      = $this->bound($indexed, 'max');
 
         $value = match (true) {
             $min !== null && $max !== null => ($min + $max) / 2,
@@ -267,8 +330,8 @@ class FakeValueGenerator
 
         $base = $this->humanString($field);
         $size = $this->number($indexed, 'size');
-        $min  = $this->number($indexed, 'min');
-        $max  = $this->number($indexed, 'max');
+        $min  = $this->bound($indexed, 'min');
+        $max  = $this->bound($indexed, 'max');
 
         // The sample keeps its readable length unless a rule forces it shorter
         // or longer; only then is it cut or padded.
@@ -413,12 +476,50 @@ class FakeValueGenerator
     /**
      * Readable sample for a regex-constrained field, so a request can be sent
      * as-is instead of failing validation on e.g. a phone number.
+     *
+     * A pattern built from assertions ("(?=.*[A-Z])" for a strong password)
+     * describes no shape to walk, so the field's own format is the sample that
+     * passes it.
      */
     private function sampleFromRegex(string $pattern, string $field): string
     {
+        if ($this->hasAssertion($pattern)) {
+            $hint = $this->typeFromFieldName($field);
+
+            if ($hint !== null && isset(self::FIXED_SAMPLES[$hint])) {
+                return self::FIXED_SAMPLES[$hint];
+            }
+        }
+
         $sample = $this->walkRegex($this->regexBody($pattern));
 
         return $sample === '' ? $this->humanString($field) : $sample;
+    }
+
+    private function hasAssertion(string $pattern): bool
+    {
+        foreach (['(?=', '(?!', '(?<=', '(?<!'] as $marker) {
+            if (str_contains($pattern, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * "(?=", "(?!", "(?<=" and "(?<!" assert without consuming any character.
+     */
+    private function isAssertion(string $pattern, int $index): bool
+    {
+        if (($pattern[$index] ?? '') !== '(' || ($pattern[$index + 1] ?? '') !== '?') {
+            return false;
+        }
+
+        $next   = $pattern[$index + 2] ?? '';
+        $second = $pattern[$index + 3] ?? '';
+
+        return $next === '=' || $next === '!' || ($next === '<' && ($second === '=' || $second === '!'));
     }
 
     /**
@@ -430,8 +531,9 @@ class FakeValueGenerator
             $pattern = $matches['body'];
         }
 
-        // "(?:", "(?P<name>" and friends behave like a plain group.
-        return preg_replace('/\(\?(?:P?<[^>]*>|[:=#!]|<[=!?])/', '(', $pattern) ?? $pattern;
+        // "(?:" and "(?P<name>" behave like a plain group. A lookahead is left
+        // intact so walkRegex() can skip it instead of emitting its contents.
+        return preg_replace('/\(\?(?:P?<[^>]*>|:)/', '(', $pattern) ?? $pattern;
     }
 
     private function walkRegex(string $pattern, int $depth = 0): string
@@ -460,6 +562,10 @@ class FakeValueGenerator
             if ($char === '\\') {
                 $unit  = $this->escapedUnit($pattern[$index + 1] ?? '');
                 $index += 2;
+            } elseif ($this->isAssertion($pattern, $index)) {
+                // "(?=…)" asserts without consuming, so nothing is emitted.
+                $index = $this->findGroupEnd($pattern, $index) + 1;
+                continue;
             } elseif ($char === '[') {
                 $closing = $this->findClassEnd($pattern, $index);
                 $unit    = $this->classUnit(substr($pattern, $index + 1, $closing - $index - 1));

@@ -92,6 +92,40 @@ return [
         // A class implementing SwanFlutter\LaravelApiSnapshot\Testing\SnapshotAuthenticator.
         // Without it every protected endpoint is skipped instead of faking a pass.
         'authenticator' => null,
+
+        // Data the scanner cannot invent: real credentials, a signature, a code
+        // the app checks with its own algorithm. A key is "METHOD /uri" — or a
+        // bare "/uri" for every verb — and "*" stands for a whole segment, so
+        // "POST /api/v1/tickets/*/reply" covers each ticket. The listed fields
+        // replace only what they name; the rest of the payload stays generated.
+        'payload_overrides' => [
+            // 'POST /api/v1/auth/login' => [
+            //     'email' => 'admin@example.com',
+            //     'password' => 'Password@123',
+            // ],
+        ],
+
+        // Endpoints that read the session inside the controller, so no middleware
+        // tells the scanner they need credentials. true authenticates and leaves
+        // the audience to the authenticator, a name sets that audience, and a
+        // false really does mean anonymous.
+        'auth_overrides' => [
+            // 'GET /api/v1/me/profile' => 'patient',
+            // 'GET /api/v1/public/*' => false,
+        ],
+
+        // A different row for one operation: the key is the URI the scanner
+        // produced and the value the URI the generated test calls.
+        'uri_overrides' => [
+            // 'DELETE /api/v1/doctor/workplaces/1' => '/api/v1/doctor/workplaces/2',
+        ],
+
+        // Per-endpoint expectation for the endpoints whose 2xx answer depends on
+        // something no fixture can provide. "handled" keeps the test in the
+        // suite but only rejects a server error.
+        'expect_overrides' => [
+            // 'POST /api/v1/sponsorship/callback' => 'handled',
+        ],
     ],
 
 ];

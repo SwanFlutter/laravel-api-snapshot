@@ -12,6 +12,7 @@ use SwanFlutter\LaravelApiSnapshot\Generators\FakeValueGenerator;
 use SwanFlutter\LaravelApiSnapshot\Support\ParamTree;
 use SwanFlutter\LaravelApiSnapshot\Support\Utf8;
 use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotEndpoint;
+use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotOverrides;
 use SwanFlutter\LaravelApiSnapshot\Testing\SnapshotPayload;
 use Throwable;
 
@@ -599,23 +600,74 @@ class ApiSnapshotGenerator
 
         foreach ($this->httpMethods($route) as $httpMethod) {
             $readOnly = $this->isReadOnly($httpMethod);
+            $verb     = strtoupper($httpMethod);
+            $fields   = SnapshotOverrides::bakedPayload(
+                (array) ($this->config['tests']['payload_overrides'] ?? []),
+                $verb,
+                $uri,
+            );
+            $target   = $this->declared('uri_overrides', $verb, $uri);
+            $auth     = $this->declared('auth_overrides', $verb, $uri);
+            $expect   = $this->declared('expect_overrides', $verb, $uri);
+            $sent     = SnapshotOverrides::apply($payload, $fields);
+
+            [$authRequired, $surface] = $this->authentication(
+                (bool) $data['authRequired'],
+                $this->surface($data['middleware'], $group),
+                $auth,
+            );
 
             $endpoints[] = new SnapshotEndpoint(
-                method: strtoupper($httpMethod),
-                uri: $uri,
-                query: $readOnly ? $payload : [],
-                body: $readOnly ? [] : $payload,
+                method: $verb,
+                uri: is_string($target) ? '/' . ltrim($target, '/') : $uri,
+                query: $readOnly ? $sent : [],
+                body: $readOnly ? [] : $sent,
                 multipart: ! $readOnly && $tree !== null && $tree->containsFile(),
-                authRequired: (bool) $data['authRequired'],
-                surface: $this->surface($data['middleware'], $group),
+                authRequired: $authRequired,
+                surface: $surface,
                 group: $groupLabel,
                 action: (string) $data['actionName'],
                 middleware: array_values(array_map('strval', (array) $data['middleware'])),
-                expectation: $this->expectation(),
+                expectation: $expect === null ? $this->expectation() : $this->normaliseExpect((string) $expect),
             );
         }
 
         return $endpoints;
+    }
+
+    /**
+     * The first value config("api-snapshot.tests.$key") declares for an
+     * endpoint, or null when the scanner's own finding stands.
+     */
+    private function declared(string $key, string $method, string $uri): mixed
+    {
+        foreach ((array) ($this->config['tests'][$key] ?? []) as $target => $value) {
+            if (SnapshotOverrides::matches((string) $target, $method, $uri)) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Whether the endpoint needs credentials and from which audience. An app that
+     * reads the session inside the controller declares that through
+     * tests.auth_overrides, because no middleware tells the scanner about it.
+     *
+     * @return array{0: bool, 1: string}
+     */
+    private function authentication(bool $required, string $surface, mixed $declared): array
+    {
+        if ($declared === false) {
+            return [false, $surface];
+        }
+
+        if ($declared === null) {
+            return [$required, $surface];
+        }
+
+        return [true, is_string($declared) && $declared !== '' ? $declared : $surface];
     }
 
     /**
@@ -669,11 +721,18 @@ class ApiSnapshotGenerator
         return strtolower(str_replace(' ', '-', $group[0] ?? 'general'));
     }
 
+    /**
+     * The suite-wide default comes from config("api-snapshot.tests.expect");
+     * tests.expect_overrides states the contract of a single endpoint.
+     */
     private function expectation(): string
     {
-        $expect = strtolower((string) ($this->config['tests']['expect'] ?? SnapshotEndpoint::EXPECT_HANDLED));
+        return $this->normaliseExpect((string) ($this->config['tests']['expect'] ?? SnapshotEndpoint::EXPECT_HANDLED));
+    }
 
-        return $expect === SnapshotEndpoint::EXPECT_SUCCESS
+    private function normaliseExpect(string $expect): string
+    {
+        return strtolower($expect) === SnapshotEndpoint::EXPECT_SUCCESS
             ? SnapshotEndpoint::EXPECT_SUCCESS
             : SnapshotEndpoint::EXPECT_HANDLED;
     }

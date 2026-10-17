@@ -4,6 +4,78 @@ All notable changes to `swanflutter/laravel-api-snapshot` are documented here. T
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the package adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-17
+
+`expect => success` is now reachable on a real application. Driving a ≈360-endpoint suite from
+"no 5xx" to "every endpoint answers 2xx/3xx" turned each remaining 422/401/404 into a missing
+package capability rather than a test to weaken.
+
+> 1.5.0 was drafted during this work and never tagged; it ships here as 1.6.0, which is also the
+> version written into the header of newly generated test files.
+
+### Added
+
+- **Database references**: a field whose rules contain `exists:table,column` is written as
+  `snapshot-ref://table/column` and resolved at request time to the lowest real value of that
+  column, so a foreign key passes instead of answering "The selected X is invalid". An empty table
+  still answers `1`, which names the field the seeder forgot.
+- **Relative dates**: `after:today`, `before_or_equal:now` and friends no longer freeze into a
+  sample date. `snapshot-dynamic://<offset>/<format>[/<sibling>]` is resolved when the request is
+  sent — from the clock, or from the sibling field another rule compares it with
+  (`date_to after date_from`), which fixes the whole class of range failures at once.
+- **`tests.payload_overrides`**: per-endpoint fields the rules cannot describe (real credentials,
+  a checksum, an OTP). An array is baked into the generated file; a `Closure` is resolved at send
+  time, which is the only way a signature over a fresh body or tomorrow's weekday can work.
+- **`tests.auth_overrides`**: declares the audience for an endpoint the middleware says nothing
+  about, because the controller reads the session itself (`GET /api/v1/me/profile => 'patient'`,
+  `POST /api/v1/auth/logout => true`, `false` to send anonymously).
+- **`tests.uri_overrides`**: one route needs a different row per operation — a delete wants a
+  record nothing references, a read wants a full one.
+- **`tests.expect_overrides`**: the suite-wide default applies everywhere except the route that
+  cannot succeed without a live third party.
+- `Testing\SnapshotOverrides` — the shared `METHOD /uri` matcher (with `*` segments) behind all four
+  declarations and the late `Closure` payloads.
+- **`SnapshotOverrides::FORGET`**: a declaration can now remove a field the scanner invented instead
+  of overwriting it. Some routes only accept a payload with the key *absent* — a site settings
+  `version` that turns an update into a conflict, a `days.*` the scanner read off an `array: days`
+  rule and filled with `days.0`. `Arr::forget` runs after the merge, and both the baked (generator)
+  and late (runner) paths go through it, so one declaration works in the file and at request time
+  alike.
+- `TestEnvironment::ignoreEnvFile()` — `api-snapshot:install-testing` adds `.env.testing` to
+  `.gitignore`, because the file starts as a copy of `.env` and so carries the real app key and
+  every third-party secret next to it.
+- Rules spread from a helper: a controller that shares one format list
+  (`'date' => ['required', ...$this->gregorianDateRules()]`) is now read through to that method's
+  `return [...]`, so `date_format` and `regex` reach the sample generator instead of vanishing.
+- Uploads carry a file the application can accept: the name follows the declared extensions
+  (`mimes:pdf,jpg` is sent as `.pdf`, since the validator guesses the type from the name), and an
+  image field gets real header bytes — a 256×256 JPEG/PNG/GIF written without GD, which
+  `getimagesize()` measures, so a controller that checks pixel dimensions stops rejecting it.
+- A write endpoint with no validation rules at all is described by what it reads:
+  `$request->file('image')` becomes an upload, just as `$request->input('page')` already did for a
+  query string.
+- A generated case is named for the expectation it holds: "responds successfully" under
+  `expect => success`, "responds without a server error" under `handled`.
+- `README.md`: "Payload markers" and "Telling the scanner what it cannot see", plus the new `tests`
+  keys in the configuration sample.
+- Tests for every marker, override and sampled edge case: 117 tests / 520 assertions in total.
+
+### Fixed
+
+- `digits:N` / `digits_between:a,b` counted magnitude instead of digits, so `national_code` got a
+  nine-digit sample and failed `digits:10`. Past nine digits the value stays a string, which a
+  32-bit PHP cannot truncate.
+- `between:a,b` was ignored when deriving a sample, so `month`, `rating` or `day_of_week` answered
+  outside their declared range; `min`/`max`/`size` bounds now fall back to it.
+- A regex built from lookarounds (`(?=.*[A-Z])…`, the usual password-strength rule) was walked as
+  if it consumed characters, producing `'a'` for a field that must be eight characters with a
+  digit and a symbol. Assertions are skipped now, and such a field takes its format's own sample.
+- A docblock example containing a path wildcard closed the comment early and made the file fail to
+  parse.
+- A field whose rules declare `string` kept its type when its name looked numeric. Only a
+  format-defining hint (email, phone, uuid, url, …) may replace the sample now, so `position` and
+  `message` stay strings instead of answering "The position field must be a string".
+
 ## [1.4.0] - 2026-10-16
 
 The route scan that produced the Postman collection can now also be written out as a runnable
@@ -23,7 +95,9 @@ integration test suite, so every endpoint is called at least once on each `php a
   `QUEUE_CONNECTION=sync`, `MAIL_MAILER=array`, `APP_KEY` copied from the environment), the matching
   `<env>` entries in `phpunit.xml`, a SQLite test database file, and the `seeders` / `authenticator`
   values inside `config/api-snapshot.php`. `--with-authenticator-stub` scaffolds a starter
-  authenticator. Nothing that is already configured is overwritten without `--force`.
+  authenticator. Because Laravel ignores `.env` as soon as `.env.testing` exists, a missing one
+  starts as a copy of `.env` and then gets the isolated values. Nothing that is already configured
+  is overwritten without `--force`.
 - `SwanFlutter\LaravelApiSnapshot\Testing` runtime for the generated files: `SnapshotEndpoint`
   (one route + payload + expectation), `SnapshotPayload`, `SnapshotRequests`
   (`run()`, `runUnauthenticated()`, `send()`, `assertHandled()`, `assertDenied()`, `prepare()`),
@@ -115,6 +189,7 @@ Initial release: `php artisan api-snapshot:generate` scans the application route
 Postman Collection v2.1 file with folders per route group, validation-derived sample payloads,
 Persian or English endpoint descriptions, and configurable auth and headers.
 
+[1.6.0]: https://github.com/SwanFlutter/laravel-api-snapshot/compare/v1.4.0...v1.6.0
 [1.4.0]: https://github.com/SwanFlutter/laravel-api-snapshot/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/SwanFlutter/laravel-api-snapshot/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/SwanFlutter/laravel-api-snapshot/compare/v1.1.0...v1.2.0

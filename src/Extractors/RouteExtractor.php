@@ -37,10 +37,11 @@ class RouteExtractor
         $rules       = $this->collectRules($route, $controller, $method, $uri, $httpMethods, $pathSample);
         $formRequest = $this->resolveFormRequest($controller, $method);
 
-        // A read endpoint with no declared rules still documents the query
-        // string it actually reads ($request->input('page') and friends).
-        if ($rules === [] && $controller !== null && $method !== null
-            && array_intersect($httpMethods, ['GET', 'HEAD', 'DELETE']) !== []) {
+        // An endpoint with no declared rules still documents what it actually
+        // reads: the query string of a GET, and for a write the input — an
+        // upload included, since `$request->file('image')` is the only place an
+        // image endpoint says a file is expected.
+        if ($rules === [] && $controller !== null && $method !== null) {
             $rules = $this->inlineExtractor->inferredInputs($controller, $method);
         }
 

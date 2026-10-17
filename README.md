@@ -215,6 +215,14 @@ return [
         'refresh_database'  => true,
         'seeders'           => [],
         'authenticator'     => null,
+
+        // What each endpoint is actually sent, called and expected to answer.
+        // Keys are "METHOD /uri" or a bare "/uri" covering every verb, with "*"
+        // standing for a path segment.
+        'payload_overrides' => [],        // fields, or a Closure resolved at send time
+        'auth_overrides'    => [],        // true | false | audience name
+        'uri_overrides'     => [],        // call this URI instead
+        'expect_overrides'  => [],        // handled | success for one endpoint
     ],
 ];
 ```
@@ -277,6 +285,70 @@ documented public API of the package, and every case keeps the payload the scann
 - A protected endpoint whose surface the authenticator cannot sign in is **skipped with a
   message**, never silently passed.
 
+### Payload markers
+
+Sample values alone cannot pass every rule, so the payload builder writes a marker instead and the
+runtime resolves it when the request is sent:
+
+| Marker | Written for | Resolved to |
+| --- | --- | --- |
+| `snapshot-file://avatar.jpg` | `file`, `image`, `mimes` rules | a fake uploaded file (multipart when any field carries one) |
+| `snapshot-ref://users/id` | the table and column of an `exists:` rule | the lowest real value of that column in the test database |
+| `snapshot-dynamic://today%20%2B1%20day/Y-m-d` | a rule compared with the clock (`after:today`) | that date, one day clear of the anchor, formatted as the rules ask |
+| `snapshot-dynamic://%2B1%20day/Y-m-d/date_from` | a rule compared with a sibling (`date_to after date_from`) | the sibling's own sent value, shifted a day |
+
+An empty table answers `1`, so in success mode a `422` names the field whose fixture is missing
+instead of passing quietly.
+
+### Telling the scanner what it cannot see
+
+Four lists in `config/api-snapshot.php` describe the endpoints the rules alone do not cover. Keys
+are `METHOD /uri` or a bare `/uri`, and `*` matches anything in the path:
+
+```php
+'tests' => [
+    'payload_overrides' => [
+        // Data no generator can invent: real credentials, a checksum, a code.
+        'POST /api/v1/auth/login' => ['phone' => '09120000004', 'password' => 'Secret#2026'],
+
+        // A value that only exists in the moment the request is sent: a one-time
+        // code, an HMAC over a fresh body, tomorrow's weekday in a Jalali pair.
+        'POST /api/v1/sponsorship/callback' => fn (SnapshotEndpoint $e) => [
+            'signature' => hash_hmac('sha256', json_encode(['order' => 7]), 'shared-secret'),
+        ],
+
+        // A field that must be *absent* — a version key that turns an update into
+        // a 409, a `days.*` the scanner read off `array: days` and invented `days.0`
+        // for. FORGET removes the path instead of overwriting it.
+        'PUT /api/v1/admin/site-settings' => ['version' => SnapshotOverrides::FORGET],
+        'PUT /api/v1/doctor/schedule'     => ['days' => ['0' => SnapshotOverrides::FORGET]],
+    ],
+
+    // Auth the middleware does not declare because the controller reads the
+    // session itself; false sends the request anonymously.
+    'auth_overrides' => [
+        'GET /api/v1/me/*'      => 'patient',
+        'POST /api/v1/auth/logout' => true,
+    ],
+
+    // One operation often needs a different row than a read: a delete wants a
+    // record nothing references.
+    'uri_overrides' => [
+        'DELETE /api/v1/doctor/workplaces/1' => '/api/v1/doctor/workplaces/2',
+    ],
+
+    // The suite default is right everywhere except the route that cannot succeed
+    // without a live third party.
+    'expect_overrides' => [
+        'POST /api/v1/payments/webhook' => 'handled',
+    ],
+],
+```
+
+`payload_overrides` replaces fields and keeps the rest generated; the other three change only what
+they name. Run `api-snapshot:tests` again after editing them — the declarations are baked into the
+generated files, so a diff shows exactly which endpoint learned what.
+
 ### Signing requests in
 
 The package does not know how your app issues credentials, so the generated tests ask a class of
@@ -319,7 +391,9 @@ you already set unless you pass `--force`:
 - `.env.testing` with `APP_ENV=testing`, `DB_CONNECTION`, `DB_DATABASE`, `CACHE_STORE=array`,
   `SESSION_DRIVER=array`, `QUEUE_CONNECTION=sync`, `MAIL_MAILER=array`, and the `APP_KEY` copied
   from your environment. Because Laravel loads *only* `.env.testing` once it exists, a missing one
-  starts as a copy of `.env`, so the other values the app reads never disappear.
+  starts as a copy of `.env`, so the other values the app reads never disappear. That copy carries
+  your real secrets, so the command also adds `.env.testing` to `.gitignore` when the entry is
+  missing.
 - The matching `<env>` entries in `phpunit.xml`.
 - `database/test.sqlite` (or `--db-file=`) when you choose a file instead of `:memory:`.
 - `tests.seeders` and `tests.authenticator` inside `config/api-snapshot.php` (`--publish` writes

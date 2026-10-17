@@ -60,7 +60,10 @@ final class RouteDiscoveryTest extends TestCase
             'include_paths'      => ['api/v1/reports/*'],
         ]));
 
-        $this->assertSame(['POST {{baseUrl}}/api/v1/reports/generate'], $wildcard);
+        $this->assertSame([
+            'POST {{baseUrl}}/api/v1/reports/days',
+            'POST {{baseUrl}}/api/v1/reports/generate',
+        ], $wildcard);
     }
 
     /**
@@ -75,7 +78,10 @@ final class RouteDiscoveryTest extends TestCase
             'include_paths'      => ['api/v1/reports'],
         ]));
 
-        $this->assertSame(['POST {{baseUrl}}/api/v1/reports/generate'], $labels);
+        $this->assertSame([
+            'POST {{baseUrl}}/api/v1/reports/days',
+            'POST {{baseUrl}}/api/v1/reports/generate',
+        ], $labels);
     }
 
     #[Test]

@@ -24,4 +24,27 @@ class AttachmentController extends Controller
             }],
         ])->validate();
     }
+
+    /**
+     * An upload whose allowed extensions only the rules say.
+     */
+    public function poster(Request $request): array
+    {
+        return $request->validate([
+            'poster' => 'required|image|mimes:png,jpeg|max:2048',
+        ]);
+    }
+
+    /**
+     * An upload the controller reads itself, with no validation rules at all.
+     */
+    public function logo(Request $request): array
+    {
+        $file = $request->file('logo');
+
+        return [
+            'name' => $file?->getClientOriginalName(),
+            'size'  => $file === null ? null : getimagesize($file->getRealPath()),
+        ];
+    }
 }

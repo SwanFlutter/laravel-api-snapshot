@@ -14,7 +14,7 @@ final class SnapshotTestGenerator
 
     public const DRIVER_PHPUNIT = 'phpunit';
 
-    public const VERSION = '1.4.0';
+    public const VERSION = '1.6.0';
 
     /** @param array<string, mixed> $config the "tests" section of api-snapshot config */
     public function __construct(
@@ -99,6 +99,19 @@ final class SnapshotTestGenerator
         return ($clean === '' ? 'General' : $clean) . 'Test.php';
     }
 
+    /** The words a case title uses: a "handled" run only rules out 5xx. */
+    private function phrase(SnapshotEndpoint $endpoint): string
+    {
+        return $endpoint->expectation === SnapshotEndpoint::EXPECT_SUCCESS
+            ? 'responds successfully'
+            : 'responds without a server error';
+    }
+
+    private function snakePhrase(SnapshotEndpoint $endpoint): string
+    {
+        return str_replace(' ', '_', $this->phrase($endpoint));
+    }
+
     /** @param list<SnapshotEndpoint> $endpoints */
     private function renderPest(string $bucket, array $endpoints): string
     {
@@ -129,8 +142,9 @@ final class SnapshotTestGenerator
             $lines[] = ');';
             $lines[] = '';
             $lines[] = sprintf(
-                "it('%s responds without a server error', function () use (\$%s) {",
+                "it('%s %s', function () use (\$%s) {",
                 $this->escape($endpoint->title()),
+                $this->phrase($endpoint),
                 $variable,
             );
             $lines[] = sprintf('    SnapshotRequests::run($this, $%s);', $variable);
@@ -195,7 +209,7 @@ final class SnapshotTestGenerator
             $lines[] = '        );';
             $lines[] = '    }';
             $lines[] = '';
-            $lines[] = sprintf('    public function test_%s_responds_without_a_server_error(): void', $method);
+            $lines[] = sprintf('    public function test_%s_%s(): void', $method, $this->snakePhrase($endpoint));
             $lines[] = '    {';
             $lines[] = sprintf('        SnapshotRequests::run($this, $this->%sCase());', $method);
             $lines[] = '    }';
